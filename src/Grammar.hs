@@ -43,6 +43,8 @@ import EqRel
 import GrammarTypes
 import qualified GrammarFeat as GF
 import qualified GrammarCoercion as GC
+import qualified GrammarParse as GP
+import qualified GrammarReachable as GR
 
 import GHC.Exts ( the )
 import Debug.Trace
@@ -93,6 +95,14 @@ data Grammar
 
 fieldNames :: Grammar -> Cat -> [FieldName]
 fieldNames gr c = M.elems $ fields gr M.! c
+
+reachEnv :: Grammar -> GR.ReachEnv
+reachEnv gr =
+  GR.reachEnvFrom
+    (symbols gr)
+    (coercions gr)
+    (nonEmptyCats gr)
+    (concrSeqs gr)
 
 --------------------------------------------------------------------------------
 -- grammar
@@ -276,32 +286,8 @@ mkCC gr fid = CC ccat fid
 
 -- parsing and reading trees
 mkTree :: Grammar -> PGF2.Expr -> Tree
-mkTree gr = disambTree . ambTree
-
- where
-  ambTree t = -- :: PGF2.Expr -> AmbTree
-    case PGF2.unApp t of
-      Just (f,xs) -> App (lookupSymbol gr f) [ ambTree x | x <- xs ]
-      Nothing     -> error (PGF2.showExpr [] t)
-
-  disambTree at =  -- :: AmbTree -> Tree
-    case foldTree reduce at of
-      App [x] ts -> App x [ disambTree t | t <- ts ]
-      App _  _ts -> error "mkTree: invalid tree"
-
-  reduce fs as =  -- :: [Symbol] -> [AmbTree] -> AmbTree
-    let red = [ symbol | symbol <- fs
-              , let argTypes =
-                     uncoerce gr `map` fst (ctyp symbol)
-              , let goalTypes =
-                     uncoerce gr `map` [ snd (ctyp s) | App [s] _ <- as ]
-              -- there should be only one symbol in (still ambiguous) fs
-              -- whose argument type matches its (already unambiguous) subtrees
-              , and [ intersect a r /= []
-                    | (a,r) <- zip argTypes goalTypes ] ]
-     in case red of
-         [x] -> App [x] as
-         _   -> App fs  as
+mkTree gr =
+  GP.mkTree (GP.parseEnvFrom (lookupSymbol gr) (coercions gr))
 
 -- categories and coercions
 ccats :: Grammar -> Cat -> [ConcrCat]
@@ -326,79 +312,10 @@ singleton _   = False
 -- compute categories reachable from S
 
 reachableCatsFromTop :: Grammar -> ConcrCat -> [ConcrCat]
-reachableCatsFromTop gr top = [ c | (c,True) <- cs `zip` rs ]
- where
-  rs = Mu.mu False defs cs
-  cs = S.toList (nonEmptyCats gr)
-
-  defs =
-    [ if c == top
-        then (c, [], \_ -> True)
-        else (c, ys, or)
-    | c <- cs
-    , let ys = S.toList $ S.fromList $
-               [ b
-               | f <- symbols gr
-               , let (as,b) = ctyp f
-               , all (`S.member` nonEmptyCats gr) as
-               , c `elem` as
-               ] ++
-               [ b
-               | (a,b) <- coercions gr
-               , a == c
-               , b `S.member` nonEmptyCats gr
-               ]
-    ]
+reachableCatsFromTop gr = GR.reachableCatsFromTop (reachEnv gr)
 
 reachableFieldsFromTop :: Grammar -> ConcrCat -> [(ConcrCat,S.Set Int)]
-reachableFieldsFromTop gr top = cs `zip` rs
- where
-  rs = Mu.mu S.empty defs cs
-  cs = S.toList (nonEmptyCats gr)
-
-  defs =
-    [ if c == top
-        then (c, [], \_ -> S.fromList [0]) -- this assumes the top only has one field
-        else (c, ys, h)
-    | c <- cs
-    , let fs = [ Right (f,k)
-               | f <- symbols gr
-               , let (as,_) = ctyp f
-               , all (`S.member` nonEmptyCats gr) as
-               , (a,k) <- as `zip` [0..]
-               , c == a
-               ] ++
-               [ Left b
-               | (a,b) <- coercions gr
-               , a == c
-               , b `S.member` nonEmptyCats gr
-               ]
-
-          ys = S.toList $ S.fromList
-               [ case f of
-                   Right (f,_) -> snd (ctyp f)
-                   Left b      -> b
-               | f <- fs
-               ]
-
-          h rs = S.unions
-                 [ case f of
-                     Right (f,k) -> apply (f,k) (args M.! snd (ctyp f))
-                     Left b      -> args M.! b
-                 | f <- fs
-                 ]
-           where
-            args = M.fromList (ys `zip` rs)
-    ]
-
-  apply (f,k) r =
-    S.fromList
-    [ j
-    | (sq,i) <- seqs f `zip` [0..]
-    , i `S.member` r
-    , Right (k',j) <- concrSeqs gr sq
-    , k' == k
-    ]
+reachableFieldsFromTop gr = GR.reachableFieldsFromTop (reachEnv gr)
 
 --------------------------------------------------------------------------------
 -- analyzing contexts
