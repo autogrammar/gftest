@@ -2,9 +2,8 @@
 
 module Grammar
     ( Grammar(..), readGrammar
-    , Tree, top, Symbol(..), showTree
-    , Cat, ConcrCat(..)
-    , Lang, Name
+    , module GrammarTypes
+    , AmbTree
 
     -- Categories, coercions
     , ccats, ccatOf, arity
@@ -41,6 +40,7 @@ import qualified Mu
 import qualified FMap as F
 import qualified Data.Tree as T
 import EqRel
+import GrammarTypes
 
 import GHC.Exts ( the )
 import Debug.Trace
@@ -48,76 +48,7 @@ import Debug.Trace
 import qualified PGF2
 import qualified PGF2.Internal as I
 
---------------------------------------------------------------------------------
--- grammar types
-
--- name
-
-type Name = String
-
--- concrete category
-
-type Cat = PGF2.Cat -- i.e. String
-
-data ConcrCat = CC (Maybe Cat) I.FId -- i.e. Int
-  deriving ( Eq )
-
-instance Show ConcrCat where
-  show (CC (Just cat) fid) = cat ++ "_" ++ show fid
-  show (CC Nothing    fid) = "_" ++ show fid
-
-instance Ord ConcrCat where
-  (CC _ fid1) `compare` (CC _ fid2) = fid1 `compare` fid2
-
-ccatOf :: Tree -> ConcrCat
-ccatOf (App tp _) = snd (ctyp tp)
-
--- tree
-
-data RoseTree a
-  = App { top :: a, args :: [RoseTree a] }
- deriving ( Eq, Ord )
-
--- from http://hackage.haskell.org/package/containers-0.5.11.0/docs/src/Data.Tree.html#foldTree
-foldTree :: (a -> [b] -> b) -> RoseTree a -> b
-foldTree f = go where
-    go (App x ts) = f x (map go ts)
-
-flatten :: RoseTree a -> [a]
-flatten (App tp as) = tp : concatMap flatten as
-
-type Tree = RoseTree Symbol
-type AmbTree = RoseTree [Symbol] -- used as an intermediate category for parsing
-
-instance Show Tree where
-  show = showTree
-
-showTree :: Tree -> String
-showTree (App a []) = show a
-showTree (App f xs) = unwords (show f : map showTreeArg xs)
-  where showTreeArg (App a []) = show a
-        showTreeArg t = "(" ++ showTree t ++ ")"
-
-subTree :: Symbol -> Tree -> Maybe Tree
-subTree symb t@(App tp tr)
-  | symb==tp  = Just t
-  | otherwise = listToMaybe $ mapMaybe (subTree symb) tr
-
--- symbol
-
-type SeqId = Int
-
-data Symbol
-  = Symbol
-  { name :: Name
-  , seqs :: [SeqId]
-  , typ  :: ([Cat], Cat)
-  , ctyp :: ([ConcrCat],ConcrCat)
-  }
- deriving ( Eq, Ord )
-
-instance Show Symbol where
-  show = name
+type AmbTree = RoseTree [Symbol]
 
 arity :: Symbol -> Int
 arity = length . fst . ctyp
@@ -131,9 +62,7 @@ showConcrFun gr detCN = show detCN ++ " : " ++ args ++ show np_209
   (dets_cns,np_209) = ctyp detCN
   args = concatMap (\x -> show x ++ " → ") dets_cns
 
--- grammar
-
-type Lang = String
+type SeqId = Int
 type FieldIndex = Int
 type ArgIndex = Int
 type FieldName = String
