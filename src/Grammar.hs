@@ -42,6 +42,7 @@ import qualified Data.Tree as T
 import EqRel
 import GrammarTypes
 import qualified GrammarFeat as GF
+import qualified GrammarCoercion as GC
 
 import GHC.Exts ( the )
 import Debug.Trace
@@ -304,28 +305,22 @@ mkTree gr = disambTree . ambTree
 
 -- categories and coercions
 ccats :: Grammar -> Cat -> [ConcrCat]
-ccats gr utt = [ cc
-               | cc@(CC (Just cat) _) <- S.toList (nonEmptyCats gr)
-               , cat == utt ]
+ccats gr = GC.ccatsFor (nonEmptyCats gr)
 
 uncoerceAbsCat :: Grammar -> ConcrCat -> Cat
-uncoerceAbsCat gr c = case c of
-  CC (Just cat) _ -> cat
-  CC Nothing    _ -> the [ uncoerceAbsCat gr x | x <- uncoerce gr c ]
+uncoerceAbsCat gr = GC.uncoerceAbsCatFor (coercions gr)
 
 uncoerce :: Grammar -> ConcrCat -> [ConcrCat]
-uncoerce gr c = case c of
-  CC Nothing _ -> lookupAll (coercions gr) c
-  _            -> [c]
+uncoerce gr = GC.uncoerceList (coercions gr)
 
 coerces :: Grammar -> ConcrCat -> ConcrCat -> Bool
-coerces gr coe cat = (cat,coe) `elem` coercions gr
+coerces gr coe cat = GC.coercesList (coercions gr) coe cat
 
 lookupAll :: (Eq a) => [(b,a)] -> a -> [b]
-lookupAll kvs key = [ v | (v,k) <- kvs, k==key ]
+lookupAll = GC.lookupAll
 
 singleton [x] = True
-singleton xs  = False
+singleton _   = False
 
 --------------------------------------------------------------------------------
 -- compute categories reachable from S
