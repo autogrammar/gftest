@@ -41,6 +41,7 @@ import qualified FMap as F
 import qualified Data.Tree as T
 import EqRel
 import GrammarTypes
+import qualified GrammarFeat as GF
 
 import GHC.Exts ( the )
 import Debug.Trace
@@ -84,7 +85,7 @@ data Grammar
   , lookupSymbol :: String -> [Symbol]
   , functionsByCat :: Cat -> [Symbol]
   , concrSeqs    :: SeqId -> [Either String (ArgIndex,FieldIndex)]
-  , feat         :: FEAT
+  , feat         :: GF.FEAT
   , nonEmptyCats :: S.Set ConcrCat
   , allCats      :: [ConcrCat]
   }
@@ -129,7 +130,7 @@ toGrammar pgf langName =
                       | f <- functionsByCat gr cat
                       , let (_,goalcat@(CC _ fid)) = ctyp f
                       , goalcat `S.member` nonEmptyCats gr
-                      , let t:_ = featAll gr goalcat -- 1 is enough; only needed to create some tree so we can call tabularLin
+                      , let t:_ = GF.featAll (feat gr) goalcat
                       , (i, (fn,_) ) <- [0..(length $ seqs f)-1] `zip` tabularLin gr t
                       ]
               )
@@ -178,7 +179,7 @@ toGrammar pgf langName =
             map cseq2Either . I.concrSequence lang
 
         , feat =
-            mkFEAT gr
+            GF.mkFEAT (symbols gr) (coercions gr)
 
         , allCats = S.toList $ S.fromList $
             [ a | f <- symbols gr, let (args,goal) = ctyp f
@@ -500,7 +501,7 @@ contexts gr top =
       | otherwise         = F.add str p fm
 
     size (_,p) =
-      sum [ if i == j then 1 else smallest gr t
+      sum [ if i == j then 1 else GF.smallest (feat gr) t
           | (f,i) <- p
           , let (ts,_) = ctyp f
           , (t,j) <- ts `zip` [0..]
@@ -562,14 +563,14 @@ contexts gr top =
     App f
     [ if j == i
         then path2context fis x
-        else head (featAll gr t)
+        else head (GF.featAll (feat gr) t)
     | (t,j) <- fst (ctyp f) `zip` [0..]
     ]
 
 forgets :: Grammar -> ConcrCat -> [(ConcrCat,[Tree])]
 forgets gr top =
   filter (not . null . snd)
-  [ (c, [ path2context (reverse p) (head (featAll gr c))
+  [ (c, [ path2context (reverse p) (head (GF.featAll (feat gr) c))
         | (is,p) <- F.toList paths
         , length is == fields c -- all indices forgotten
         ]
@@ -622,7 +623,7 @@ forgets gr top =
       | otherwise         = F.add str p fm
 
     size (_,p) =
-      sum [ if i == j then 1 else smallest gr t
+      sum [ if i == j then 1 else GF.smallest (feat gr) t
           | (f,i) <- p
           , let (ts,_) = ctyp f
           , (t,j) <- ts `zip` [0..]
@@ -690,7 +691,7 @@ forgets gr top =
     App f
     [ if j == i
         then path2context fis x
-        else head (featAll gr t)
+        else head (GF.featAll (feat gr) t)
     | (t,j) <- fst (ctyp f) `zip` [0..]
     ]
 
@@ -759,90 +760,25 @@ emptyFields gr = cs `zip` fields
       , all isEmpty (concrSeqs gr sq)
       ]
 --------------------------------------------------------------------------------
--- FEAT-style generator magic
-
-type FEAT = [ConcrCat] -> Int -> (Integer, Integer -> [Tree])
+-- FEAT-style generator (see GrammarFeat)
 
 smallest :: Grammar -> ConcrCat -> Int
-smallest gr c = head [ n | n <- [0..], featCard gr c n > 0 ]
+smallest gr = GF.smallest (feat gr)
 
--- compute how many trees there are of a given size and type
 featCard :: Grammar -> ConcrCat -> Int -> Integer
-featCard gr c n = featCardVec gr [c] n
+featCard gr = GF.featCard (feat gr)
 
--- generate the i-th tree of a given size and type
 featIth :: Grammar -> ConcrCat -> Int -> Integer -> Tree
-featIth gr c n i = head (featIthVec gr [c] n i)
+featIth gr = GF.featIth (feat gr)
 
--- generate all trees (infinitely many) of a given type
 featAll :: Grammar -> ConcrCat -> [Tree]
-featAll gr c = [ featIth gr c n i | n <- [0..], i <- [0..featCard gr c n-1] ]
+featAll gr = GF.featAll (feat gr)
 
--- compute how many tree-vectors there are of a given size and type-vector
 featCardVec :: Grammar -> [ConcrCat] -> Int -> Integer
-featCardVec gr cs n = fst (feat gr cs n)
+featCardVec gr = GF.featCardVec (feat gr)
 
--- generate the i-th tree-vector of a given size and type-vector
 featIthVec :: Grammar -> [ConcrCat] -> Int -> Integer -> [Tree]
-featIthVec gr cs n i = snd (feat gr cs n) i
-
-mkFEAT :: Grammar -> FEAT
-mkFEAT gr = catList
- where
-  catList' :: FEAT
-  catList' [] 0 = (1, \0 -> [])
-  catList' [] _ = (0, error "indexing in an empty sequence")
-
-  catList' [c] s =
-    parts $
-          [ (n, \i -> [App f (h i)])
-          | s > 0
-          , f <- symbols gr
-          , let (xs,y) = ctyp f
-          , y == c
-          , let (n,h) = catList xs (s-1)
-          ] ++
-          [ catList [x] s -- put (s-1) if it doesn't terminate
-          | s > 0
-          , (x,y) <- coercions gr
-          , y == c
-          ]
-
-  catList' (c:cs) s =
-    parts [ (nx*nxs, \i -> hx (i `mod` nx) ++ hxs (i `div` nx))
-          | k <- [0..s]
-          , let (nx,hx)   = catList [c] k
-                (nxs,hxs) = catList cs (s-k)
-          ]
-
-  catList :: FEAT
-  catList = memoList (memoNat . catList')
-   where
-    -- all possible categories of the grammar
-    cats = S.toList $ S.fromList $
-           [ x | f <- symbols gr
-               , let (xs,y) = ctyp f
-               , x <- y:xs ] ++
-           [ z | (x,y) <- coercions gr
-               , z <- [x,y] ]
-
-    memoList f = \cs -> case cs of
-                    []   -> fNil
-                    a:as -> fCons a as
-     where
-      fNil  = f []
-      fCons = (tab M.!)
-      tab   = M.fromList [ (c, memoList (f . (c:))) | c <- cats ]
-
-    memoNat f = (tab!!)
-     where
-      tab = [ f i | i <- [0..] ]
-
-  parts []          = (0, error "indexing outside of a sequence")
-  parts ((n,h):nhs) = (n+n', \i -> if i < n then h i else h' (i-n))
-   where
-    (n',h') = parts nhs
-
+featIthVec gr = GF.featIthVec (feat gr)
 
 --------------------------------------------------------------------------------
 -- Functions used in Main
@@ -1026,10 +962,10 @@ treesUsingFun gr detCNs =
 bestTrees :: Symbol -> Grammar -> [ConcrCat] -> [[Tree]]
 bestTrees fun gr cats =
   bestExamples fun gr $ take 200 -- change this to something else if too slow
-  [ featIthVec gr cats size i
+  [ GF.featIthVec (feat gr) cats size i
   | all (`S.member` nonEmptyCats gr) cats
   , size <- [0..20]
-  , let card = featCardVec gr cats size
+  , let card = GF.featCardVec (feat gr) cats size
   , i <- [0..card-1]
   ]
 
