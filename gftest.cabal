@@ -12,7 +12,7 @@ cabal-version: >=1.10
 library
   hs-source-dirs:      src
   exposed-modules:     Grammar
-  other-modules:       Mu, Graph, FMap, EqRel, GrammarTypes, GrammarFeat, GrammarCoercion, GrammarParse, GrammarReachable
+  other-modules:       Mu, Graph, FMap, EqRel, GrammarTypes, GrammarFeat, GrammarCoercion, GrammarParse, GrammarReachable, GrammarContexts
   build-depends:       base
                      , containers
                      , pgf2
@@ -21,7 +21,7 @@ library
 executable gftest
   hs-source-dirs:      src
   main-is:             Main.hs
-  other-modules:       Grammar, Mu, Graph, FMap, EqRel, GrammarTypes, GrammarFeat, GrammarCoercion, GrammarParse, GrammarReachable
+  other-modules:       Grammar, Mu, Graph, FMap, EqRel, GrammarTypes, GrammarFeat, GrammarCoercion, GrammarParse, GrammarReachable, GrammarContexts
   build-depends:       base
                      , pgf2
                      , cmdargs
